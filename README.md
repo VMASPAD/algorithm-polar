@@ -6,7 +6,7 @@
 
 An interactive educational tool that transforms any text into a live, physics-simulated 3D galaxy — revealing how AI language models "understand" words through mathematics.
 
-[![Demo](https://img.shields.io/badge/🚀_Live_Demo-CubePath-00C853?style=for-the-badge)](https://algorithm-polar.cubepath.app)
+[![Demo](https://img.shields.io/badge/🚀_Live_Demo-CubePath-00C853?style=for-the-badge)](http://157.254.174.96:5173/)
 [![Hackaton](https://img.shields.io/badge/Hackatón-CubePath_2026-FF6B6B?style=for-the-badge&logo=cloud&logoColor=white)](https://midu.link/cubepath)
 [![Tech](https://img.shields.io/badge/Stack-React_+_Three.js_+_GSAP-61DAFB?style=for-the-badge&logo=react&logoColor=white)](#-tech-stack)
 
@@ -28,7 +28,7 @@ Escribe cualquier frase → observa en tiempo real cómo se tokeniza, convierte 
 
 ![Demo animation](./public/demo.gif)
 
-> **🚀 Live demo:** [algorithm-polar.cubepath.app](https://algorithm-polar.cubepath.app)
+> **🚀 Live demo:** [algorithm-polar.cubepath.app](http://157.254.174.96:5173/)
 
 ---
 

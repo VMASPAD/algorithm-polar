@@ -1579,3 +1579,55 @@
   padding-bottom: 4px;
   border-bottom: 1px solid var(--border-subtle);
 }
+
+/* ══════════════════════════════════════════════════════════════
+   Stage 05 — GenerateCard, amber theme
+══════════════════════════════════════════════════════════════ */
+.rtpv-gen-card {
+  border-color: color-mix(in oklch, oklch(0.78 0.18 72) 35%, transparent) !important;
+  background: color-mix(in oklch, oklch(0.78 0.18 72) 4%, var(--surface-card)) !important;
+  opacity: 1 !important;
+}
+
+.rtpv-gen-card .rtpv-stage-row.clickable:hover {
+  background: color-mix(in oklch, oklch(0.78 0.18 72) 10%, transparent) !important;
+}
+
+.rtpv-gen-num {
+  color: oklch(0.78 0.18 72) !important;
+}
+
+.rtpv-gen-label {
+  color: oklch(0.88 0.14 78) !important;
+}
+
+.rtpv-gen-title {
+  color: oklch(0.78 0.18 72) !important;
+}
+
+.rtpv-gen-canvas-wrap {
+  height: 160px;
+}
+
+/* Pulse for GenerateCard uses amber */
+.rtpv-gen-card .rtpv-pulse {
+  border-color: oklch(0.78 0.18 72) !important;
+  animation: rtpv-ring 1.4s ease-out infinite;
+}
+
+.rtpv-gen-card .rtpv-chevron.open {
+  color: oklch(0.78 0.18 72) !important;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   all-done: restore full brightness on completed stages
+══════════════════════════════════════════════════════════════ */
+.rtpv-wrap.all-done .rtpv-stage.done {
+  opacity: 1;
+  border-color: color-mix(in oklch, var(--stage-color, var(--accent)) 28%, var(--border-subtle));
+}
+
+.rtpv-wrap.all-done .rtpv-stage.done .rtpv-check {
+  color: var(--stage-color, var(--accent));
+  text-shadow: 0 0 8px color-mix(in oklch, var(--stage-color, var(--accent)) 60%, transparent);
+}

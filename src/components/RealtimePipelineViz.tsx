@@ -153,20 +153,21 @@ export function RealtimePipelineViz({ progress, tokens, inputText }: Props) {
   }, []);
 
   const currentIdx = stageIndex(progress.stage);
+  const allDone = progress.stage === 'done';
 
   return (
-    <div className="rtpv-wrap" ref={wrapRef}>
+    <div className={`rtpv-wrap${allDone ? ' all-done' : ''}`} ref={wrapRef}>
       <div className="rtpv-header">
         <span className="rtpv-header-tag">Procesamiento en Tiempo Real</span>
         <span className="rtpv-header-stage">
-          {progress.stage === 'done' ? '✓ Completado' :
+          {allDone ? '✓ Completado' :
            progress.stage === 'error' ? '✗ Error' :
            STAGES.find(s => s.id === progress.stage)?.label ?? ''}
         </span>
       </div>
 
       {STAGES.map((stage, i) => {
-        const isDone      = currentIdx > i || progress.stage === 'done';
+        const isDone      = currentIdx > i || allDone;
         const isActive    = progress.stage === stage.id;
         const isPending   = !isDone && !isActive;
         const isExpanded  = expanded.has(stage.id);
@@ -186,9 +187,15 @@ export function RealtimePipelineViz({ progress, tokens, inputText }: Props) {
           />
         );
       })}
+
+      {/* ── Stage 05: Generación de Respuesta ─────────────────── */}
+      {allDone && (
+        <GenerateCard tokens={tokens} inputText={inputText} />
+      )}
     </div>
   );
 }
+
 
 /* ══════════════════════════════════════════════════════════════════
    Stage Card
@@ -903,3 +910,383 @@ function animRTSimulate(
   }
   draw();
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   Stage 05 — GenerateCard (Transformer response decoding)
+══════════════════════════════════════════════════════════════════ */
+function GenerateCard({ tokens, inputText }: { tokens: Token[]; inputText: string }) {
+  const cardRef   = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const aliveRef  = useRef({ value: false });
+  const tlRef     = useRef<gsap.core.Timeline | null>(null);
+  const [isExpanded, setIsExpanded] = useState(true);
+
+  /* Entrance animation */
+  useEffect(() => {
+    if (!cardRef.current) return;
+    gsap.fromTo(cardRef.current,
+      { autoAlpha: 0, y: 20, scale: 0.97 },
+      { autoAlpha: 1, y: 0, scale: 1, duration: 0.55, ease: 'back.out(1.5)', delay: 0.15 },
+    );
+  }, []);
+
+  /* Canvas */
+  useEffect(() => {
+    aliveRef.current.value = false;
+    tlRef.current?.kill();
+    if (!canvasRef.current || !isExpanded) return;
+    const alive = { value: true };
+    aliveRef.current = alive;
+    animRTGenerate(canvasRef.current, alive, tokens, inputText, tl => { tlRef.current = tl; });
+    return () => { alive.value = false; tlRef.current?.kill(); };
+  }, [isExpanded, tokens, inputText]);
+
+  return (
+    <div
+      ref={cardRef}
+      className="rtpv-stage rtpv-gen-card"
+      style={{ '--stage-color': 'oklch(0.78 0.18 72)' } as React.CSSProperties}
+    >
+      {/* Header */}
+      <div
+        className="rtpv-stage-row clickable"
+        onClick={() => setIsExpanded(e => !e)}
+        role="button"
+        aria-expanded={isExpanded}
+      >
+        <div className="rtpv-stage-num-wrap">
+          <span className="rtpv-num rtpv-gen-num">05</span>
+          {isExpanded && <span className="rtpv-pulse" />}
+        </div>
+        <div className="rtpv-stage-info">
+          <span className="rtpv-stage-label rtpv-gen-label">Generar Respuesta</span>
+          <span className="rtpv-stage-sub">Decodificación Autoregresiva Transformer</span>
+        </div>
+        <span className={`rtpv-chevron${isExpanded ? ' open' : ''}`} aria-hidden="true">▾</span>
+      </div>
+
+      {/* Body */}
+      {isExpanded && (
+        <div className="rtpv-detail">
+          <div className="rtpv-canvas-wrap rtpv-gen-canvas-wrap">
+            <canvas ref={canvasRef} className="rtpv-canvas" />
+            <div className="rtpv-canvas-label">Atención · Logits · Decodificación</div>
+          </div>
+          <div className="rtpv-detail-body">
+            <div className="rtpv-detail-title rtpv-gen-title">
+              Transformer — Atención Multi-Cabeza
+            </div>
+            <div className="rtpv-code-block">
+              <div className="rtpv-math-line formula">
+                <code>Attention(Q,K,V) = softmax(QKᵀ / √dₖ) · V</code>
+              </div>
+              <div className="rtpv-math-line">
+                <code>P(wₙ | w₁…wₙ₋₁) = softmax(Wₒ · hₙ)</code>
+              </div>
+              <div className="rtpv-math-line">
+                <code>next = argmax(logits) | sample(T=0.8)</code>
+              </div>
+            </div>
+            <p className="rtpv-detail-desc">
+              El modelo calcula pesos de atención entre todos los tokens del contexto, procesa la representación con N capas Transformer y proyecta a logits sobre el vocabulario (~100k). Softmax convierte logits en probabilidades; el token con mayor P (o uno muestreado con temperatura T) se añade al contexto y el proceso se repite hasta generar la respuesta completa.
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── animRTGenerate canvas ──────────────────────────────────────
+   Phase 1: Attention heatmap NxN (real tokens)
+   Phase 2: Logit bar chart 3D isometric perspective
+   Phase 3: Autoregressive token generation
+─────────────────────────────────────────────────────────────── */
+function animRTGenerate(
+  canvas: HTMLCanvasElement,
+  alive: { value: boolean },
+  tokens: Token[],
+  _inputText: string,
+  registerTl: (tl: gsap.core.Timeline) => void,
+) {
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  const c = canvas.getContext('2d')!;
+  if (!c) return;
+
+
+
+  const parent = canvas.parentElement;
+  const rect   = parent?.getBoundingClientRect();
+  const dpr    = window.devicePixelRatio || 2;
+  canvas.width  = (rect?.width  ?? 300) * dpr;
+  canvas.height = (rect?.height ?? 160) * dpr;
+  c.scale(dpr, dpr);
+  const W = canvas.width / dpr;
+  const H = canvas.height / dpr;
+
+  const cs = getComputedStyle(document.documentElement);
+  const col = {
+    amber:  'oklch(0.8 0.19 72)',
+    amberD: 'oklch(0.62 0.16 68)',
+    amberL: 'oklch(0.92 0.14 80)',
+    b9: cs.getPropertyValue('--base-900').trim() || '#1a1a2e',
+    b8: cs.getPropertyValue('--base-800').trim() || '#2a2a44',
+    b7: cs.getPropertyValue('--base-700').trim() || '#444466',
+    b5: cs.getPropertyValue('--base-500').trim() || '#7070a0',
+    b4: cs.getPropertyValue('--base-400').trim() || '#8888aa',
+    p4: cs.getPropertyValue('--primary-400').trim() || '#5ab589',
+    s4: cs.getPropertyValue('--secondary-400').trim() || '#b570b5',
+  };
+
+  const N = Math.min(tokens.length || 4, 6);
+  const toks = tokens.length > 0 ? tokens.slice(0, N) : Array.from({ length: N }, (_, i) => ({
+    id: i * 1337, text: ['token', 'embed', 'PCA', 'mass', 'sim', 'edge'][i],
+    mass: 5 + i, radius: 8, position: [0,0,0] as [number,number,number], velocity: [0,0,0] as [number,number,number], color: '#5ab589',
+  }));
+
+  /* Attention matrix: softmax over sin-seeded scores */
+  const rawAttn: number[][] = Array.from({ length: N }, (_, i) =>
+    Array.from({ length: N }, (_, j) => {
+      const v = (Math.sin(toks[i].id * 0.071 + toks[j].id * 0.139 + i * 0.4 + j * 0.3) + 1.2) / 2.2;
+      return v;
+    })
+  );
+  // Row-softmax
+  rawAttn.forEach(row => {
+    const expRow = row.map(v => Math.exp(v * 3));
+    const sum = expRow.reduce((a, b) => a + b, 0);
+    row.forEach((_, j) => { row[j] = expRow[j] / sum; });
+  });
+
+  /* Logit distribution (seeded from token data) */
+  const logitCount = 8;
+  const rawLogits = Array.from({ length: logitCount }, (_, i) => {
+    const t = toks[i % N];
+    return Math.abs(Math.sin(t.id * 0.23 + i * 0.71)) * (t.mass / 10 + 0.3);
+  });
+  const expL = rawLogits.map(v => Math.exp(v * 4));
+  const sumL = expL.reduce((a, b) => a + b, 0);
+  const probs = expL.map(v => v / sumL);
+  const topI  = probs.indexOf(Math.max(...probs));
+
+  /* Generated token sequence: top-k by mass */
+  const genTokens = [...toks]
+    .sort((a, b) => b.mass - a.mass)
+    .slice(0, Math.min(5, N))
+    .map(t => t.text.slice(0, 6));
+
+  /* Animation state */
+  const a = { attn: 0, scan: 0, logit: 0, gen: 0, blink: 0 };
+  const tl = gsap.timeline({ repeat: -1, repeatDelay: 1 });
+  tl.to(a, { attn: 1, duration: 0.9, ease: 'power2.out' });
+  tl.to(a, { scan: N, duration: 1.4, ease: 'none' }, '+=0.2');
+  tl.to(a, { logit: 1, duration: 0.9, ease: 'power3.out' }, '+=0.3');
+  genTokens.forEach((_, gi) => {
+    tl.to(a, { gen: gi + 0.01, blink: 1, duration: 0.25, ease: 'power2.inOut' }, `+=0.${gi === 0 ? '2' : '38'}`);
+    tl.to(a, { gen: gi + 1, blink: 0, duration: 0.18 });
+  });
+  tl.to(a, { duration: 1.2 });
+  tl.call(() => { a.attn = 0; a.scan = 0; a.logit = 0; a.gen = 0; a.blink = 0; });
+  registerTl(tl);
+
+  /* Heat color mapping */
+  function heat(v: number): string {
+    const L = 0.22 + v * 0.6;
+    const C = 0.05 + v * 0.2;
+    const H2 = 270 - v * 200; // blue → amber
+    return `oklch(${L.toFixed(2)} ${C.toFixed(2)} ${H2.toFixed(0)})`;
+  }
+
+  function draw() {
+    if (!alive.value) return;
+    c.clearRect(0, 0, W, H);
+
+    /* ── Phase 1: Attention heatmap (left 44%) ── */
+    const hmX = 18;
+    const hmY = H * 0.06;
+    const hmW = W * 0.41;
+    const hmH = H * 0.7;
+    const cw  = hmW / N;
+    const ch  = hmH / N;
+
+    if (a.attn > 0) {
+      for (let i = 0; i < N; i++) {
+        for (let j = 0; j < N; j++) {
+          const prog = Math.min(a.attn * (N * N + 2) - (i * N + j) * 0.6, 1);
+          if (prog <= 0) continue;
+          const v = rawAttn[i][j];
+          c.save();
+          c.globalAlpha = prog * 0.92;
+          c.fillStyle = heat(v);
+          const scanHighlight = a.scan > 0 && Math.abs(a.scan - i) < 1;
+          if (scanHighlight) { c.shadowColor = col.amberL; c.shadowBlur = 14; }
+          rr(c, hmX + j * cw + 1, hmY + i * ch + 1, cw - 2, ch - 2, 2);
+          c.fill();
+          c.restore();
+        }
+      }
+
+      /* Axis labels */
+      c.save();
+      c.globalAlpha = a.attn * 0.55;
+      c.font = `500 ${Math.min(6.5, cw * 0.55)}px "JetBrains Mono", monospace`;
+      c.fillStyle = col.b4;
+      toks.forEach((t, i) => {
+        const lbl = t.text.slice(0, 4);
+        c.textAlign = 'right';
+        c.fillText(lbl, hmX - 3, hmY + i * ch + ch * 0.68);
+        c.textAlign = 'center';
+        c.save();
+        c.translate(hmX + i * cw + cw / 2, hmY - 3);
+        c.rotate(-0.72);
+        c.fillText(lbl, 0, 0);
+        c.restore();
+      });
+      c.restore();
+
+      /* Scanner query row */
+      if (a.scan > 0 && a.scan < N) {
+        const sy = hmY + a.scan * ch;
+        c.save(); c.globalAlpha = 0.85;
+        c.strokeStyle = col.amber; c.lineWidth = 1.5;
+        c.shadowColor = col.amber; c.shadowBlur = 10;
+        c.beginPath(); c.moveTo(hmX, sy); c.lineTo(hmX + hmW, sy); c.stroke();
+        c.restore();
+      }
+
+      c.save(); c.globalAlpha = a.attn * 0.5;
+      c.font = '500 7px "DM Sans", sans-serif';
+      c.fillStyle = col.amberD; c.textAlign = 'center';
+      c.fillText('Pesos de Atención', hmX + hmW / 2, hmY + hmH + 13);
+      c.restore();
+    }
+
+    /* ── Phase 2: Logit bars 3D isometric (middle 36%) ── */
+    const barAreaX = hmX + hmW + 14;
+    const barAreaW = W * 0.35;
+    const barAreaH = H * 0.62;
+    const barAreaY = H * 0.06;
+    const bw2 = barAreaW / logitCount;
+    const perspD = 7;
+    const perspA = 0.38;
+
+    if (a.logit > 0) {
+      c.save();
+      for (let b = 0; b < logitCount; b++) {
+        const prog = Math.max(0, Math.min(1, a.logit * (logitCount + 2) - b));
+        if (prog <= 0) continue;
+        const bh = probs[b] * barAreaH * prog;
+        const bx = barAreaX + b * bw2;
+        const by = barAreaY + barAreaH - bh;
+        const isTop = b === topI;
+
+        /* Front face */
+        c.globalAlpha = isTop ? 0.92 : 0.55;
+        c.fillStyle = isTop ? col.amber : col.b7;
+        if (isTop) { c.shadowColor = col.amber; c.shadowBlur = 14 * a.logit; }
+        rr(c, bx + 2, by, bw2 - 4, bh, 2);
+        c.fill(); c.shadowBlur = 0;
+
+        /* Side face (3D right) */
+        if (bh > 5) {
+          c.globalAlpha = isTop ? 0.5 : 0.3;
+          c.fillStyle = isTop ? col.amberD : col.b8;
+          c.beginPath();
+          c.moveTo(bx + bw2 - 2, by);
+          c.lineTo(bx + bw2 - 2 + perspD, by - perspD * perspA);
+          c.lineTo(bx + bw2 - 2 + perspD, by - perspD * perspA + bh);
+          c.lineTo(bx + bw2 - 2, by + bh);
+          c.closePath(); c.fill();
+        }
+
+        /* Top face */
+        if (bh > 3) {
+          c.globalAlpha = isTop ? 0.75 : 0.38;
+          c.fillStyle = isTop ? col.amberL : col.b5;
+          c.beginPath();
+          c.moveTo(bx + 2, by);
+          c.lineTo(bx + 2 + perspD, by - perspD * perspA);
+          c.lineTo(bx + bw2 - 2 + perspD, by - perspD * perspA);
+          c.lineTo(bx + bw2 - 2, by);
+          c.closePath(); c.fill();
+        }
+
+        /* Probability label */
+        if (prog > 0.6) {
+          c.globalAlpha = (prog - 0.6) * 2.5 * (isTop ? 1 : 0.7);
+          c.font = `${isTop ? '700' : '500'} ${isTop ? 7 : 6}px "JetBrains Mono", monospace`;
+          c.fillStyle = isTop ? col.amberL : col.b4;
+          c.textAlign = 'center';
+          c.shadowBlur = 0;
+          c.fillText(`${Math.round(probs[b] * 100)}%`, bx + bw2 / 2, by - 5);
+          const lbl = (toks[b % N]?.text ?? `t${b}`).slice(0, 3);
+          c.globalAlpha = (prog - 0.6) * 2.5 * 0.5;
+          c.font = `500 5px "JetBrains Mono", monospace`;
+          c.fillStyle = col.b4;
+          c.fillText(lbl, bx + bw2 / 2, barAreaY + barAreaH + 10);
+        }
+      }
+      c.restore();
+      // Label
+      c.save(); c.globalAlpha = a.logit * 0.5;
+      c.font = '500 7px "DM Sans", sans-serif';
+      c.fillStyle = col.amberD; c.textAlign = 'center';
+      c.fillText('Distribución Softmax', barAreaX + barAreaW / 2, barAreaY - 4);
+      c.restore();
+    }
+
+    /* ── Phase 3: Generated tokens (bottom strip) ── */
+    if (a.gen > 0) {
+      const genY = H * 0.87;
+      c.save();
+      c.globalAlpha = Math.min(a.logit * 3, 1) * 0.5;
+      c.font = '500 7px "DM Sans", sans-serif';
+      c.fillStyle = col.b5; c.textAlign = 'left';
+      c.fillText('► Respuesta generada:', 8, genY - 13);
+      c.restore();
+
+      const tokColors = [col.amber, col.p4, col.s4, col.amberD, col.amberL];
+      let drawX = 8;
+      const maxStep = Math.floor(a.gen);
+
+      for (let gi = 0; gi < maxStep && gi < genTokens.length; gi++) {
+        const tok = genTokens[gi];
+        const clr = tokColors[gi % tokColors.length];
+        c.save();
+        c.font = '600 8px "JetBrains Mono", monospace';
+        const tw2 = c.measureText(tok).width + 12;
+        c.globalAlpha = 0.92;
+        c.fillStyle = col.b9; c.strokeStyle = clr; c.lineWidth = 1;
+        c.shadowColor = clr; c.shadowBlur = 5;
+        rr(c, drawX, genY - 10, tw2, 18, 4);
+        c.fill(); c.stroke(); c.shadowBlur = 0;
+        c.fillStyle = clr; c.textAlign = 'left';
+        c.fillText(tok, drawX + 6, genY + 2);
+        c.restore();
+        drawX += tw2 + 4;
+      }
+
+      /* Blinking next-token cursor */
+      if (Math.floor(a.gen) < genTokens.length && a.blink > 0) {
+        c.save();
+        c.globalAlpha = a.blink * 0.85;
+        c.fillStyle = col.amber; c.shadowColor = col.amber; c.shadowBlur = 16 * a.blink;
+        rr(c, drawX, genY - 10, 14, 18, 4); c.fill();
+        // Particle burst
+        for (let p = 0; p < 5; p++) {
+          const angle = (p / 5) * Math.PI * 2 + Date.now() * 0.003;
+          const pr = 10 * a.blink;
+          c.globalAlpha = a.blink * 0.4;
+          c.beginPath();
+          c.arc(drawX + 7 + Math.cos(angle) * pr, genY - 1 + Math.sin(angle) * pr * 0.5, 1.5, 0, Math.PI * 2);
+          c.fill();
+        }
+        c.restore();
+      }
+    }
+
+    requestAnimationFrame(draw);
+  }
+  draw();
+}
+
