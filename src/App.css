@@ -1550,3 +1550,32 @@
   opacity: 1;
   box-shadow: 0 0 10px color-mix(in oklch, var(--stage-color, var(--accent)) 12%, transparent);
 }
+
+/* ── Multi-line math code block ──────────────────────────────── */
+.rtpv-code-block {
+  background: var(--surface-deep);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-x: auto;
+}
+
+.rtpv-math-line code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  color: var(--base-400);
+  white-space: pre;
+  display: block;
+}
+
+.rtpv-math-line.formula code {
+  color: var(--primary-300);
+  font-size: 0.7rem;
+  font-weight: 600;
+  margin-bottom: 3px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-subtle);
+}

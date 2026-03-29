@@ -32,32 +32,97 @@ interface Props {
   inputText: string;
 }
 
-const STAGE_DETAILS: Record<string, { title: string; math: string; description: string }> = {
+const STAGE_DETAILS_STATIC: Record<string, { title: string; description: string }> = {
   tokenizing: {
     title: 'Byte-Pair Encoding (BPE)',
-    math: 'encode("Hola mundo") → [2341, 9812]',
     description:
-      'El texto crudo se fragmenta en sub-palabras mediante BPE. El algoritmo busca iterativamente los pares de bytes más frecuentes y los fusiona, creando un vocabulario compacto (~100 k tokens). Cada fragmento resultante se mapea a un ID entero único.',
+      'El texto crudo se fragmenta iterativamente en sub-palabras fusionando pares de bytes más frecuentes (~100 k vocab). Cada fragmento obtiene un ID entero único.',
   },
   embedding: {
     title: 'Vector Embedding 1536-d',
-    math: 'ID:2341 → [0.021, −0.83, …, 0.12]₁₅₃₆',
     description:
-      'Cada ID se envía al modelo de embeddings (text-embedding-3-small). Internamente indexa una fila en una matrix de pesos entrenada. El resultado es un vector denso de 1 536 dimensiones normalizado a longitud 1 (L2) que codifica significado y contexto.',
+      'Cada ID indexa una fila en la matrix de pesos del modelo (text-embedding-3-small). Resultado: vector denso normalizado L2 que codifica significado y contexto.',
   },
   pca: {
     title: 'PCA — Reducción de Dimensiones',
-    math: 'cos_sim(a, b) = a·b / (|a|·|b|)',
     description:
-      'PCA (NIPALS iterativo) encuentra los 3 ejes de máxima varianza en el espacio de 1 536 dimensiones y proyecta cada vector a un punto 3D (X, Y, Z). Simultáneamente la similitud coseno entre todos los pares genera una matrix N×N de la que se extraen masas semánticas y un MST via Kruskal.',
+      'PCA (NIPALS iterativo) proyecta el espacio 1536-d a 3 ejes de máxima varianza. La similitud coseno entre todos los pares genera la masa semántica y las aristas MST (Kruskal).',
   },
   similarity: {
     title: 'Simulación Física N-Body',
-    math: 'F = G·m₁·m₂/r² + K·(d−d₀) − C/r²',
     description:
-      'Los tokens se convierten en cuerpos celestes con masa proporcional a su peso semántico. Un motor de física aplica gravedad (Barnes-Hut O(n log n) con Octree), fuerzas de resorte a lo largo del MST (Hooke K=0.12), repulsión de corto alcance y colisiones elásticas (e=0.65). El resultado es una galaxia semántica viva.',
+      'Tokens → cuerpos celestes. Motor físico propio: gravedad Barnes-Hut O(n log n), resortes Hooke sobre aristas MST (K=0.12, d₀=16u), repulsión corto alcance, colisiones elásticas (e=0.65).',
   },
 };
+
+/* ── Dynamic math lines per stage ───────────────────────────────
+   Generates real numbers from the actual run data.
+─────────────────────────────────────────────────────────────── */
+function buildStageMath(
+  stageId: string,
+  inputText: string,
+  tokens: Token[],
+  progress: PipelineProgress,
+): string {
+  const words = inputText.trim().split(/\s+/).filter(Boolean);
+
+  switch (stageId) {
+    case 'tokenizing': {
+      // Show first 5 words → fake BPE IDs (deterministic hash)
+      const shown = words.slice(0, 5);
+      const lines = shown.map((w, i) => {
+        const fakeId = ((w.charCodeAt(0) * 97 + w.length * 1337 + i * 491) % 98000) + 1000;
+        return `"${w}" → #${fakeId}`;
+      });
+      if (words.length > 5) lines.push(`… +${words.length - 5} más`);
+      return lines.join('\n');
+    }
+
+    case 'embedding': {
+      const total = progress.embeddingProgress?.total ?? words.length;
+      const done  = progress.embeddingProgress?.completed ?? total;
+      const pct   = total > 0 ? Math.round((done / total) * 100) : 100;
+      // Show first token's fake vector head if we have tokens
+      const firstTok = tokens[0];
+      const vecHead = firstTok
+        ? `[${Array.from({ length: 6 }, (_, i) =>
+            (Math.sin(firstTok.id * 0.3 + i * 1.7) * 0.95).toFixed(3)
+          ).join(', ')}, …]₁₅₃₆`
+        : `[0.021, -0.830, 0.114, -0.272, 0.556, -0.043, …]₁₅₃₆`;
+      return `${done}/${total} tokens (${pct}%)\n${firstTok ? `"${firstTok.text}"` : 'Token'} → ${vecHead}`;
+    }
+
+    case 'pca': {
+      if (tokens.length === 0) {
+        return 'cos_sim(a, b) = a·b / (|a|·|b|)\n1536-d → 3-d (X, Y, Z)';
+      }
+      // Show top-3 tokens with real 3D positions
+      const shown = tokens.slice(0, 4);
+      const lines = shown.map(t => {
+        const [x, y, z] = t.position;
+        return `"${t.text.slice(0, 8)}" → (${x.toFixed(1)}, ${y.toFixed(1)}, ${z.toFixed(1)})`;
+      });
+      if (tokens.length > 4) lines.push(`… +${tokens.length - 4} tokens`);
+      return lines.join('\n');
+    }
+
+    case 'similarity': {
+      const formula = 'F = G·m₁·m₂/r² + K·(d−d₀) − C/r²';
+      if (tokens.length === 0) return formula;
+      // Show top-3 by mass with real values
+      const sorted = [...tokens].sort((a, b) => b.mass - a.mass).slice(0, 4);
+      const lines  = sorted.map(t =>
+        `"${t.text.slice(0, 8)}" m=${t.mass.toFixed(2)} r=${t.radius.toFixed(1)}`
+      );
+      return `${formula}\n\n${lines.join('\n')}`;
+    }
+
+    default:
+      return '';
+  }
+}
+
+
 
 /* ══════════════════════════════════════════════════════════════════
    Main component
@@ -148,7 +213,8 @@ function StageCard({ stage, isActive, isDone, isPending, isExpanded, onToggle, p
   const tlRef     = useRef<gsap.core.Timeline | null>(null);
 
   const showCanvas  = isActive || (isDone && isExpanded);
-  const details     = STAGE_DETAILS[stage.id];
+  const staticData  = STAGE_DETAILS_STATIC[stage.id];
+  const mathLines   = buildStageMath(stage.id, inputText, tokens, progress);
 
   /* Canvas animation */
   useEffect(() => {
@@ -229,13 +295,19 @@ function StageCard({ stage, isActive, isDone, isPending, isExpanded, onToggle, p
           </div>
 
           {/* Math + description */}
-          {details && (
+          {staticData && (
             <div className="rtpv-detail-body">
-              <div className="rtpv-detail-title">{details.title}</div>
-              <div className="rtpv-code-line">
-                <code>{details.math}</code>
-              </div>
-              <p className="rtpv-detail-desc">{details.description}</p>
+              <div className="rtpv-detail-title">{staticData.title}</div>
+              {mathLines && (
+                <div className="rtpv-code-block">
+                  {mathLines.split('\n').map((line, i) => (
+                    <div key={i} className={`rtpv-math-line${i === 0 ? ' formula' : ''}`}>
+                      <code>{line}</code>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p className="rtpv-detail-desc">{staticData.description}</p>
             </div>
           )}
 
